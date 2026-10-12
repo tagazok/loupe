@@ -249,7 +249,7 @@ export class LoupePanel extends LitElement {
       ${lossy ? this.slider('Quality', Math.round(store.exportQuality * 100), 10, 100, (v) => { store.exportQuality = v / 100; store.emit(); }, '%') : nothing}
       <button class="primary" @click=${() => store.exportActive()}>${icon('download', 16)} Save image</button>
       ${store.docs.length > 1 ? html`<button @click=${() => store.exportAll()}>Save all ${store.docs.length} images</button>` : nothing}
-      <p class="hint">Files go to your Downloads folder as “name-edited”. Your originals are never changed.</p>
+      <p class="hint">Files go to your Downloads folder as “name-edited”. Your originals are never changed. Open tabs are also kept in this browser, so they’re still here when you come back (undo history isn’t).</p>
     </section>`;
   }
 

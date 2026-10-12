@@ -1,0 +1,29 @@
+{
+  "name": "Loupe — image editor",
+  "short_name": "Loupe",
+  "description": "A tiny Photoshop-style image editor that runs entirely on your computer. Crop, resize, blur, pixelate, black & white.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1b1c1f",
+  "theme_color": "#1b1c1f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/png": [".png"],
+        "image/webp": [".webp"],
+        "image/gif": [".gif"],
+        "image/avif": [".avif"],
+        "image/bmp": [".bmp"]
+      }
+    }
+  ]
+}

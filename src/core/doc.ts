@@ -23,6 +23,8 @@ let nextDocId = 1;
 
 export class ImageDoc {
   readonly id = nextDocId++;
+  /** Stable identity across app restarts (storage key). */
+  readonly key: string;
   name: string;
   /** Original file type; used as the default export format. */
   mime: string;
@@ -36,8 +38,13 @@ export class ImageDoc {
   cropRect: Rect | null = null;
   view: View | null = null;
   dirty = false;
+  /** Bumped on every pixel change; lets background saves detect newer edits. */
+  revision = 0;
+  /** The image is in local storage (so metadata-only writes are safe). */
+  stored = false;
 
-  constructor(name: string, mime: string, fileSize: number, px: Px) {
+  constructor(name: string, mime: string, fileSize: number, px: Px, key: string = crypto.randomUUID()) {
+    this.key = key;
     this.name = name;
     this.mime = mime;
     this.fileSize = fileSize;
@@ -74,6 +81,7 @@ export class ImageDoc {
     this.undoStack.push(entry);
     this.redoStack = [];
     this.dirty = true;
+    this.revision++;
     this.trimHistory();
   }
 
@@ -111,6 +119,7 @@ export class ImageDoc {
 
   /** Restore an entry and return the inverse entry (the state it replaced). */
   private swap(e: HistoryEntry): HistoryEntry {
+    this.revision++;
     if (e.kind === 'full') {
       const inverse: HistoryEntry = { label: e.label, kind: 'full', px: this.px };
       this.px = e.px;
