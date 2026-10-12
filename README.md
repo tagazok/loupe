@@ -14,6 +14,26 @@ A tiny Photoshop-style image editor that runs entirely in the browser. No server
 - **Apply to all open images:** batch resize, rotate, flip or recolour every tab, then "Save all".
 - Undo/redo for each tab. Zoom with pinch or ⌘-scroll, pan by scrolling or holding Space.
 - Save as the original format, JPEG, PNG or WebP, with a quality setting. Saved files are named `name-edited.ext`.
+- **Your tabs come back.** Close Loupe and reopen it on the same computer and browser, and your open images return with their edits. Undo history is not kept.
+- **Installable app**, which also works offline. When installed in Chrome, Edge or Arc, you can "Open with → Loupe" from Finder.
+
+## Keeping images between sessions
+
+Open tabs are stored in the browser's IndexedDB, on this computer only. An unedited image is stored as its original file. An edited image is re-saved as a lossless PNG about a second after your last change, in a background worker. The status bar shows "Kept on this computer" and how much space it uses. Closing a tab deletes its stored copy.
+
+Safari can clear a website's data if you haven't visited for 7 days. Installing Loupe as an app (or using Chrome) avoids that.
+
+## Updates (service worker)
+
+Each build gets a unique version (`<semver>+<build id>`), stamped into `sw.js`. Updates are designed never to get stuck:
+
+- `sw.js` changes on every deploy, and it's registered with `updateViaCache: 'none'`, so the browser always notices a new version.
+- The page (`index.html`) is loaded **network-first**: opening Loupe while online always gets the latest version. The cache is only used offline.
+- A new service worker activates immediately and removes old caches. Already-open windows get a "new version — Reload now" banner, and your tabs survive the reload.
+- An open installed app checks for updates whenever it regains focus, and every 30 minutes.
+- GitHub Pages' CDN can take up to about 10 minutes to serve a new `sw.js` after a deploy.
+
+To release a new version, bump `version` in `package.json` (shown in the status bar) and merge to `main`. A new build id is generated even if you don't bump it.
 
 ## How it handles big photos
 

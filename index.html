@@ -6,6 +6,10 @@
     <meta name="description" content="Loupe — a tiny Photoshop-style image editor that runs entirely in your browser. Crop, resize, blur, pixelate, black & white. Nothing is uploaded." />
     <meta name="theme-color" content="#1b1c1f" />
     <title>Loupe — image editor</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Loupe" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234c8dff' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='6.5'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E" />
     <style>
       :root {
@@ -32,6 +36,8 @@
         --tooltip: #f0f1f4;
         --tooltip-fg: #17181b;
         --danger: #c8434b;
+        --ok: #3fb96f;
+        --warn: #e0a83a;
       }
       html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; }
     </style>

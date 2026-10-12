@@ -2,6 +2,7 @@ import { ImageDoc } from './core/doc';
 import { engine } from './core/engine';
 import { clampRect, extract, fullRect, putRegion, type Px, type Rect, type Shape } from './core/pixels';
 import type { WorkerRequest } from './core/protocol';
+import { Keeper } from './keeper';
 
 export type Tool = 'hand' | 'select-rect' | 'select-ellipse' | 'crop';
 export type ExportFormat = 'original' | 'image/png' | 'image/jpeg' | 'image/webp';
@@ -66,9 +67,17 @@ export class Store extends EventTarget {
   exportQuality = 0.92;
   /** Image coordinate under the pointer, for the status bar. */
   cursor: { x: number; y: number } | null = null;
+  /** Keeps open tabs in local storage across app restarts. */
+  readonly keeper = new Keeper(this);
   private toastId = 1;
 
   emit() {
+    this.keeper.metaChanged();
+    this.notify();
+  }
+
+  /** Re-render only (no storage write). */
+  notify() {
     this.dispatchEvent(new Event('change'));
   }
 
@@ -154,6 +163,7 @@ export class Store extends EventTarget {
         const doc = new ImageDoc(f.name, f.type || 'image/png', f.size, r.value);
         await doc.refreshBitmap();
         this.docs = [...this.docs, doc];
+        void this.keeper.addOriginal(doc, f);
         first ??= doc;
       }
       if (first) this.activeId = first.id;
@@ -168,6 +178,7 @@ export class Store extends EventTarget {
     const idx = this.docs.indexOf(doc);
     this.docs = this.docs.filter((d) => d !== doc);
     doc.dispose();
+    void this.keeper.remove(doc);
     if (this.activeId === id) {
       const next = this.docs[Math.min(idx, this.docs.length - 1)];
       this.activeId = next?.id ?? null;
@@ -183,6 +194,7 @@ export class Store extends EventTarget {
     const label = doc.undo();
     if (label) {
       await doc.refreshBitmap();
+      this.keeper.imageChanged(doc);
       this.toast(`Undo: ${label}`);
     }
     this.emit();
@@ -194,9 +206,22 @@ export class Store extends EventTarget {
     const label = doc.redo();
     if (label) {
       await doc.refreshBitmap();
+      this.keeper.imageChanged(doc);
       this.toast(`Redo: ${label}`);
     }
     this.emit();
+  }
+
+  /** Bring back the tabs that were open last time. Called once at startup. */
+  async restore() {
+    await this.job('Reopening your images', async () => {
+      const { docs, activeKey, failed } = await this.keeper.restore();
+      if (docs.length === 0 && failed === 0) return;
+      this.docs = [...docs, ...this.docs];
+      this.activeId = (docs.find((d) => d.key === activeKey) ?? docs[0])?.id ?? this.activeId;
+      this.keeper.refreshUsage();
+      if (failed > 0) this.toast(`${failed} saved image(s) couldn’t be reopened.`, 'error');
+    });
   }
 
   // -------------------------------------------------------------- selection
@@ -245,6 +270,7 @@ export class Store extends EventTarget {
       doc.pushPatch(label, sel.x, sel.y, before);
     }
     await doc.refreshBitmap();
+    this.keeper.imageChanged(doc);
   }
 
   /** Replace the whole image (geometry changes). Clears selection and refits the view. */
@@ -256,6 +282,7 @@ export class Store extends EventTarget {
     doc.cropRect = null;
     doc.view = null;
     await doc.refreshBitmap();
+    this.keeper.imageChanged(doc);
   }
 
   /** Colour adjustment: selection-aware on a single image, whole image for every tab in batch mode. */

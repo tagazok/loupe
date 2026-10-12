@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { formatBytes, store, type Tool } from '../store';
+import { APP_VERSION, handleLaunchFiles, registerServiceWorker } from '../pwa';
 import { ellipseSelectIcon, icon } from './icons';
 import './loupe-canvas';
 import './loupe-panel';
@@ -88,17 +89,37 @@ export class LoupeApp extends LitElement {
       .toasts { position: fixed; bottom: 38px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; z-index: 60; }
       .toast { background: var(--tooltip); color: var(--tooltip-fg); padding: 8px 14px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size: 13px; }
       .toast.error { background: var(--danger); color: #fff; }
+      .update {
+        position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px;
+        background: var(--panel); color: var(--text-strong); border: 1px solid var(--accent); border-radius: 10px;
+        padding: 8px 8px 8px 14px; box-shadow: 0 10px 34px rgba(0,0,0,0.45); font-size: 13px;
+      }
+      footer .keep { display: flex; align-items: center; gap: 6px; }
+      footer .keep .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+      footer .keep.saving .dot { background: var(--warn); }
+      footer .keep.error .dot { background: var(--danger); }
+      footer .version { margin-left: auto; opacity: 0.7; }
+      footer .busy + .version { margin-left: 0; }
       input[type='file'] { display: none; }
     `,
   ];
 
   readonly ctrl = new StoreController(this);
   @state() private dragging = false;
+  /** Set when a newer version of Loupe has been installed in the background. */
+  @state() private updateVersion: string | null = null;
+  /** Chromium's deferred install prompt, when the app can be installed. */
+  @state() private installPrompt: (Event & { prompt(): Promise<void> }) | null = null;
   @query('input[type=file]') private fileInput!: HTMLInputElement;
   private dragDepth = 0;
 
   connectedCallback() {
     super.connectedCallback();
+    void store.restore();
+    registerServiceWorker((version) => (this.updateVersion = version));
+    handleLaunchFiles((files) => void store.openFiles(files));
+    window.addEventListener('beforeinstallprompt', this.onInstallPrompt);
+    window.addEventListener('appinstalled', this.onInstalled);
     window.addEventListener('dragenter', this.onDragEnter);
     window.addEventListener('dragover', this.onDragOver);
     window.addEventListener('dragleave', this.onDragLeave);
@@ -117,7 +138,34 @@ export class LoupeApp extends LitElement {
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('paste', this.onPaste);
     window.removeEventListener('beforeunload', this.onBeforeUnload);
+    window.removeEventListener('beforeinstallprompt', this.onInstallPrompt);
+    window.removeEventListener('appinstalled', this.onInstalled);
   }
+
+  private onInstallPrompt = (e: Event) => {
+    e.preventDefault();
+    this.installPrompt = e as Event & { prompt(): Promise<void> };
+  };
+
+  private onInstalled = () => {
+    this.installPrompt = null;
+    store.toast('Loupe is installed. You can open it from your Dock or app launcher.');
+  };
+
+  private install = async () => {
+    const p = this.installPrompt;
+    if (!p) return;
+    this.installPrompt = null;
+    await p.prompt();
+  };
+
+  private reloadForUpdate = () => {
+    if (store.keeper.pending) {
+      store.toast('Finishing saving your images… try again in a second.');
+      return;
+    }
+    location.reload();
+  };
 
   render() {
     const doc = store.active;
@@ -137,6 +185,7 @@ export class LoupeApp extends LitElement {
           )}
         </div>
         <div class="actions">
+          ${this.installPrompt ? html`<button @click=${this.install} title="Install Loupe as an app on this computer">${icon('download', 16)} Install app</button>` : nothing}
           <button class="ghost" aria-label="Undo" title="Undo (${MOD}Z)" ?disabled=${!doc?.canUndo} @click=${() => store.undo()}>${icon('undo', 16)}</button>
           <button class="ghost" aria-label="Redo" title="Redo (${MOD}⇧Z)" ?disabled=${!doc?.canRedo} @click=${() => store.redo()}>${icon('redo', 16)}</button>
           <button @click=${this.pickFiles}>${icon('open', 16)} Open</button>
@@ -157,6 +206,13 @@ export class LoupeApp extends LitElement {
       ${this.renderStatus()}
 
       ${this.dragging ? html`<div class="drop" aria-hidden="true"><div>${icon('imagePlus', 22)} Drop to open — each image gets its own tab</div></div>` : nothing}
+      ${this.updateVersion
+        ? html`<div class="update" role="alert">
+            <span>A new version of Loupe is ready. Your open images will still be here after reloading.</span>
+            <button class="primary" @click=${this.reloadForUpdate}>Reload now</button>
+            <button class="ghost" aria-label="Later" @click=${() => (this.updateVersion = null)}>${icon('close', 14)}</button>
+          </div>`
+        : nothing}
       <div class="toasts" role="status" aria-live="polite">
         ${store.toasts.map((t) => html`<div class="toast ${t.kind}">${t.text}</div>`)}
       </div>
@@ -185,10 +241,24 @@ export class LoupeApp extends LitElement {
     </div>`;
   }
 
+  private renderKeep() {
+    const k = store.keeper;
+    if (k.state === 'unavailable' || store.docs.length === 0) return nothing;
+    const used = k.usedBytes != null ? ` · ${formatBytes(k.usedBytes)}` : '';
+    const [cls, text, tip] =
+      k.state === 'error'
+        ? ['error', 'Not kept', 'Some images could not be stored in this browser and will be gone after closing Loupe.']
+        : k.state === 'saving' || k.pending
+          ? ['saving', 'Keeping…', 'Storing your latest changes on this computer.']
+          : ['', `Kept on this computer${used}`, 'Your open images will still be here when you reopen Loupe. Closing a tab forgets it. Undo history is not kept.'];
+    return html`<span class="keep ${cls}" title=${tip}><span class="dot"></span>${text}</span>`;
+  }
+
   private renderStatus() {
     const doc = store.active;
+    const version = html`<span class="version" title="Loupe version">v${APP_VERSION.split('+')[0]}</span>`;
     if (!doc) {
-      return html`<footer>${store.busy ? html`<span class="busy"><span class="spinner"></span>${store.busy}…</span>` : html`<span>No image open</span>`}</footer>`;
+      return html`<footer>${store.busy ? html`<span class="busy"><span class="spinner"></span>${store.busy}…</span>` : html`<span>No image open</span>`}${version}</footer>`;
     }
     const zoom = doc.view ? Math.round(doc.view.zoom * 1000) / 10 : 100;
     return html`<footer>
@@ -201,7 +271,9 @@ export class LoupeApp extends LitElement {
       <span>${doc.width} × ${doc.height} px</span>
       <span>${formatBytes(doc.fileSize)} file</span>
       <span>${store.cursor ? `x ${store.cursor.x}, y ${store.cursor.y}` : ''}</span>
+      ${this.renderKeep()}
       ${store.busy ? html`<span class="busy"><span class="spinner"></span>${store.busy}…</span>` : nothing}
+      ${version}
     </footer>`;
   }
 
@@ -256,7 +328,8 @@ export class LoupeApp extends LitElement {
   };
 
   private onBeforeUnload = (e: BeforeUnloadEvent) => {
-    if (store.docs.some((d) => d.dirty)) e.preventDefault();
+    // Open images are kept automatically; only warn while a save is still being written.
+    if (store.keeper.pending) e.preventDefault();
   };
 
   // ------------------------------------------------------------ shortcuts

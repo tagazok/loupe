@@ -22,6 +22,11 @@ class Engine {
 
   constructor(private readonly size: number) {}
 
+  /** Start the workers ahead of first use. */
+  warm() {
+    this.ensureStarted();
+  }
+
   /** Workers start on first use, so importing this module has no side effects. */
   private ensureStarted() {
     if (this.slots.length) return;
