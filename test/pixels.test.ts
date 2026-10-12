@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blendShape,
   blurRegion,
   brightnessContrast,
   clampRect,
@@ -134,6 +135,19 @@ describe('region effects', () => {
     const left = at(edge, 19, 0)[0];
     const right = at(edge, 20, 0)[0];
     expect(Math.abs(left + right - 255)).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('inverted selection (edit everything except the shape)', () => {
+  it('restores the original pixels inside the shape after a full-image edit', () => {
+    const before = solid(20, 20, [200, 50, 50, 255]);
+    const out = solid(20, 20, [200, 50, 50, 255]);
+    grayscale(out); // the "whole image" edit
+    const sel = { x: 5, y: 5, w: 10, h: 10 };
+    blendShape(out, extract(before, sel), sel, 'ellipse');
+    expect(at(out, 10, 10)).toEqual([200, 50, 50, 255]); // inside the oval: untouched
+    expect(at(out, 1, 1)[0]).toBe(at(out, 1, 1)[1]); // outside: grey
+    expect(at(out, 5, 5)[0]).toBe(at(out, 5, 5)[1]); // bbox corner is outside the oval: grey
   });
 });
 

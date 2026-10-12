@@ -1,6 +1,8 @@
 import { svg, type SVGTemplateResult } from 'lit';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import {
+  ChevronDown,
+  ChevronRight,
   Circle,
   Contrast,
   Crop,
@@ -8,6 +10,7 @@ import {
   Droplets,
   FlipHorizontal,
   FlipVertical,
+  FolderDown,
   FolderOpen,
   Grid3x3,
   Hand,
@@ -19,9 +22,11 @@ import {
   Redo2,
   RotateCcw,
   RotateCw,
+  Save,
   Scaling,
   Square,
   SquareDashed,
+  SquaresExclude,
   SunMedium,
   Undo2,
   X,
@@ -32,6 +37,11 @@ import {
 type IconNode = [tag: string, attrs: Record<string, string | number | undefined>][];
 
 const ICONS = {
+  chevron: ChevronRight,
+  chevronDown: ChevronDown,
+  folderDown: FolderDown,
+  save: Save,
+  invert: SquaresExclude,
   circle: Circle,
   contrast: Contrast,
   crop: Crop,

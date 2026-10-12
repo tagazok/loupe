@@ -186,6 +186,74 @@ export class LoupeCanvas extends LitElement {
     else ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
   }
 
+  /**
+   * Clip to the area an operation would affect: the selection, everything
+   * outside it (inverted), or the whole image.
+   */
+  private clipToTarget(ctx: CanvasRenderingContext2D, doc: ImageDoc, tl: { x: number; y: number }, iw: number, ih: number) {
+    const sel = !store.batch ? doc.selectionRect() : null;
+    if (!sel) {
+      ctx.beginPath();
+      ctx.rect(tl.x, tl.y, iw, ih);
+      ctx.clip();
+      return;
+    }
+    const ellipse = doc.selection?.shape === 'ellipse';
+    this.shapePath(ctx, doc, sel, ellipse);
+    if (doc.selection?.inverted) {
+      ctx.rect(tl.x, tl.y, iw, ih);
+      ctx.clip('evenodd');
+    } else {
+      ctx.clip();
+    }
+  }
+
+  private pixelCache: { key: string; canvas: HTMLCanvasElement } | null = null;
+
+  /** Live preview of the pending Blur / Pixelate / Brightness-contrast. */
+  private drawPreview(ctx: CanvasRenderingContext2D, doc: ImageDoc, tl: { x: number; y: number }, iw: number, ih: number) {
+    const pv = store.preview;
+    if (!pv || !doc.bitmap) return;
+    const zoom = this.view(doc).zoom;
+    const hasFilter = 'filter' in ctx;
+    ctx.save();
+    this.clipToTarget(ctx, doc, tl, iw, ih);
+    if (pv.kind === 'bc' && hasFilter) {
+      if (pv.brightness !== 1 || pv.contrast !== 1) {
+        ctx.filter = `brightness(${pv.brightness}) contrast(${pv.contrast})`;
+        ctx.drawImage(doc.bitmap, tl.x, tl.y, iw, ih);
+      }
+    } else if (pv.kind === 'blur' && hasFilter) {
+      // Same Gaussian (σ = radius) as Apply, at screen scale.
+      ctx.filter = `blur(${pv.radius * zoom}px)`;
+      ctx.drawImage(doc.bitmap, tl.x, tl.y, iw, ih);
+    } else if (pv.kind === 'pixelate') {
+      // Blocks start at the selection's corner, like the real operation
+      // (or the image corner when the whole image / everything-but is affected).
+      const sel = !store.batch && !doc.selection?.inverted ? doc.selectionRect() : null;
+      const region = sel ?? { x: 0, y: 0, w: doc.width, h: doc.height };
+      const b = Math.max(1, Math.round(pv.block));
+      const tw = Math.ceil(region.w / b);
+      const th = Math.ceil(region.h / b);
+      const key = `${doc.id}:${doc.revision}:${b}:${region.x},${region.y},${region.w},${region.h}`;
+      if (this.pixelCache?.key !== key) {
+        const c = document.createElement('canvas');
+        c.width = tw;
+        c.height = th;
+        const g = c.getContext('2d')!;
+        g.imageSmoothingEnabled = true;
+        g.imageSmoothingQuality = 'high';
+        // Shrinking so one output pixel = one block averages each block.
+        g.drawImage(doc.bitmap, region.x, region.y, tw * b, th * b, 0, 0, tw, th);
+        this.pixelCache = { key, canvas: c };
+      }
+      const p = this.toScreen(doc, region.x, region.y);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.pixelCache.canvas, p.x, p.y, tw * b * zoom, th * b * zoom);
+    }
+    ctx.restore();
+  }
+
   private draw() {
     const ctx = this.canvas?.getContext('2d');
     if (!ctx) return;
@@ -210,19 +278,7 @@ export class LoupeCanvas extends LitElement {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(doc.bitmap, tl.x, tl.y, iw, ih);
 
-    // Live brightness/contrast preview (exactly matches Apply: same CSS formulas).
-    const pv = store.preview;
-    if (pv && (pv.brightness !== 1 || pv.contrast !== 1)) {
-      ctx.save();
-      const sel = !store.batch ? doc.selectionRect() : null;
-      if (sel) {
-        this.shapePath(ctx, doc, sel, doc.selection?.shape === 'ellipse');
-        ctx.clip();
-      }
-      ctx.filter = `brightness(${pv.brightness}) contrast(${pv.contrast})`;
-      ctx.drawImage(doc.bitmap, tl.x, tl.y, iw, ih);
-      ctx.restore();
-    }
+    this.drawPreview(ctx, doc, tl, iw, ih);
 
     const accent = this.css('--accent', '#4c8dff');
 
@@ -257,11 +313,19 @@ export class LoupeCanvas extends LitElement {
       ctx.restore();
     }
 
-    // Selection: marching ants.
+    // Selection: marching ants (around the image edge too when inverted).
     if (doc.selection && store.tool !== 'crop') {
       const r = doc.selection.rect;
+      const inverted = !!doc.selection.inverted;
       ctx.save();
+      if (inverted && !store.preview) {
+        // Show which part is protected: a light veil over the kept-as-is shape.
+        this.shapePath(ctx, doc, r, doc.selection.shape === 'ellipse');
+        ctx.fillStyle = 'rgba(76,141,255,0.18)';
+        ctx.fill();
+      }
       this.shapePath(ctx, doc, r, doc.selection.shape === 'ellipse');
+      if (inverted) ctx.rect(tl.x + 0.5, tl.y + 0.5, iw - 1, ih - 1);
       ctx.lineWidth = 1;
       ctx.setLineDash([5, 3]);
       ctx.strokeStyle = '#000';
@@ -274,7 +338,8 @@ export class LoupeCanvas extends LitElement {
       if (store.tool === 'select-rect' || store.tool === 'select-ellipse') {
         this.drawHandles(ctx, doc, r, accent);
         const a = this.toScreen(doc, r.x, r.y + r.h);
-        this.drawLabel(ctx, `${Math.round(r.w)} × ${Math.round(r.h)}`, a.x, a.y + 8);
+        const size = `${Math.round(r.w)} × ${Math.round(r.h)}`;
+        this.drawLabel(ctx, inverted ? `Everything except ${size}` : size, a.x, a.y + 8);
       }
     }
   }
@@ -416,10 +481,9 @@ export class LoupeCanvas extends LitElement {
       doc.cropRect = r;
     } else {
       // A new drag takes the current tool's shape; moving/resizing keeps the existing shape.
-      const shape = this.drag?.kind === 'new' || !doc.selection
-        ? (store.tool === 'select-ellipse' ? 'ellipse' : 'rect')
-        : doc.selection.shape;
-      doc.selection = { rect: r, shape };
+      const isNew = this.drag?.kind === 'new' || !doc.selection;
+      const shape = isNew ? (store.tool === 'select-ellipse' ? 'ellipse' : 'rect') : doc.selection!.shape;
+      doc.selection = { rect: r, shape, inverted: isNew ? false : doc.selection!.inverted };
     }
     store.emit();
   }
