@@ -6,14 +6,16 @@ A tiny Photoshop-style image editor that runs entirely in the browser. No server
 
 - Drag and drop one or many images (or paste with ⌘V). Each one opens in its own tab.
 - Rectangle and oval selection with handles. Hold Shift for a square or circle.
-- Blur, pixelate or fill the selection (or the whole image).
+- **Everything except the selection** (⌘⇧I): blur or pixelate a background around a face, or recolour everything but one area.
+- Blur, pixelate or fill the selection (or the whole image), with a **live preview** as you move the slider.
 - Black & white, invert, brightness/contrast with a live preview.
 - Crop with aspect-ratio presets (free, original, 1:1, 4:3, 3:2, 16:9, 9:16).
 - High-quality Lanczos resize by exact pixels, percentage or longest side.
 - Rotate and flip.
 - **Apply to all open images:** batch resize, rotate, flip or recolour every tab, then "Save all".
 - Undo/redo for each tab. Zoom with pinch or ⌘-scroll, pan by scrolling or holding Space.
-- Save as the original format, JPEG, PNG or WebP, with a quality setting. Saved files are named `name-edited.ext`.
+- Save from the top bar (⌘S) as the original format, JPEG, PNG or WebP, with a quality setting. Saved files are named `name-edited.ext`. In Chrome, Edge and Arc, **Save as…** (⌘⇧S) lets you choose the name and folder, and **Save all to a folder…** writes every tab to a folder you pick.
+- Panel sections collapse, and Loupe remembers which ones you keep open.
 - **Your tabs come back.** Close Loupe and reopen it on the same computer and browser, and your open images return with their edits. Undo history is not kept.
 - **Installable app**, which also works offline. When installed in Chrome, Edge or Arc, you can "Open with → Loupe" from Finder.
 

@@ -3,6 +3,8 @@ import { clampRect, clonePx, extract, putRegion, type Px, type Rect, type Shape 
 export interface Selection {
   rect: Rect; // image coordinates, may be fractional while dragging
   shape: Shape;
+  /** When true, operations apply to everything OUTSIDE the shape. */
+  inverted?: boolean;
 }
 
 /** One undo step. 'full' = whole previous image; 'patch' = previous pixels of a region. */

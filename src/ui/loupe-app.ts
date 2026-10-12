@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import { formatBytes, store, type Tool } from '../store';
+import { formatBytes, store, type ExportFormat, type Tool } from '../store';
 import { APP_VERSION, handleLaunchFiles, registerServiceWorker } from '../pwa';
 import { ellipseSelectIcon, icon } from './icons';
 import './loupe-canvas';
@@ -89,6 +89,21 @@ export class LoupeApp extends LitElement {
       .toasts { position: fixed; bottom: 38px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; z-index: 60; }
       .toast { background: var(--tooltip); color: var(--tooltip-fg); padding: 8px 14px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size: 13px; }
       .toast.error { background: var(--danger); color: #fff; }
+      .save { position: relative; display: flex; }
+      .save .save-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      .save .save-more { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid color-mix(in srgb, var(--on-accent) 35%, transparent); padding: 4px 6px; }
+      .save .fmt { font: 600 10px var(--mono); opacity: 0.85; padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--on-accent) 18%, transparent); }
+      .save-menu {
+        position: absolute; right: 0; top: calc(100% + 6px); z-index: 80; width: 280px; display: grid; gap: 10px; padding: 12px;
+        background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 14px 40px rgba(0,0,0,0.5);
+      }
+      .save-menu .field { display: grid; gap: 4px; }
+      .save-menu label { display: flex; justify-content: space-between; }
+      .save-menu output { font: 12px var(--mono); color: var(--text); }
+      .menu-actions { display: grid; gap: 6px; }
+      .menu-actions button { justify-content: flex-start; }
+      .menu-actions kbd { margin-left: auto; }
+      .menu-actions .primary kbd { color: var(--on-accent); background: transparent; border-color: color-mix(in srgb, var(--on-accent) 40%, transparent); }
       .update {
         position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px;
         background: var(--panel); color: var(--text-strong); border: 1px solid var(--accent); border-radius: 10px;
@@ -110,6 +125,7 @@ export class LoupeApp extends LitElement {
   @state() private updateVersion: string | null = null;
   /** Chromium's deferred install prompt, when the app can be installed. */
   @state() private installPrompt: (Event & { prompt(): Promise<void> }) | null = null;
+  @state() private saveOpen = false;
   @query('input[type=file]') private fileInput!: HTMLInputElement;
   private dragDepth = 0;
 
@@ -120,6 +136,7 @@ export class LoupeApp extends LitElement {
     handleLaunchFiles((files) => void store.openFiles(files));
     window.addEventListener('beforeinstallprompt', this.onInstallPrompt);
     window.addEventListener('appinstalled', this.onInstalled);
+    window.addEventListener('click', this.onDocClick);
     window.addEventListener('dragenter', this.onDragEnter);
     window.addEventListener('dragover', this.onDragOver);
     window.addEventListener('dragleave', this.onDragLeave);
@@ -140,6 +157,7 @@ export class LoupeApp extends LitElement {
     window.removeEventListener('beforeunload', this.onBeforeUnload);
     window.removeEventListener('beforeinstallprompt', this.onInstallPrompt);
     window.removeEventListener('appinstalled', this.onInstalled);
+    window.removeEventListener('click', this.onDocClick);
   }
 
   private onInstallPrompt = (e: Event) => {
@@ -167,6 +185,70 @@ export class LoupeApp extends LitElement {
     location.reload();
   };
 
+  // ------------------------------------------------------------------ save
+
+  private formatLabel(): string {
+    const doc = store.active;
+    const f = store.exportFormat;
+    const mime = f === 'original' ? doc?.mime : f;
+    return mime === 'image/jpeg' ? 'JPEG' : mime === 'image/webp' ? 'WebP' : 'PNG';
+  }
+
+  private renderSave() {
+    const doc = store.active;
+    const n = store.docs.length;
+    const lossy = this.formatLabel() !== 'PNG';
+    return html`<div class="save">
+      <button class="primary save-main" ?disabled=${!doc} title="Save to Downloads (${MOD}S)" @click=${() => store.exportActive()}>
+        ${icon('save', 16)} Save <span class="fmt">${this.formatLabel()}</span>
+      </button>
+      <button class="primary save-more" ?disabled=${!doc} aria-label="Save options" aria-haspopup="dialog" aria-expanded=${this.saveOpen}
+        @click=${(e: Event) => { e.stopPropagation(); this.saveOpen = !this.saveOpen; }}>${icon('chevronDown', 16)}</button>
+      ${this.saveOpen && doc
+        ? html`<div class="save-menu" role="dialog" aria-label="Save options" @click=${(e: Event) => e.stopPropagation()}>
+            <div class="field">
+              <label for="fmt">Format</label>
+              <select id="fmt" .value=${store.exportFormat} @change=${(e: Event) => { store.exportFormat = (e.target as HTMLSelectElement).value as ExportFormat; store.emit(); }}>
+                <option value="original">Same as original</option>
+                <option value="image/jpeg">JPEG (smaller, photos)</option>
+                <option value="image/png">PNG (lossless, transparency)</option>
+                <option value="image/webp">WebP (smallest)</option>
+              </select>
+            </div>
+            ${lossy
+              ? html`<div class="field">
+                  <label for="q">Quality <output for="q">${Math.round(store.exportQuality * 100)}%</output></label>
+                  <input id="q" type="range" min="10" max="100" .value=${String(Math.round(store.exportQuality * 100))}
+                    @input=${(e: Event) => { store.exportQuality = Number((e.target as HTMLInputElement).value) / 100; store.emit(); }} />
+                </div>`
+              : nothing}
+            <div class="menu-actions">
+              <button class="primary" @click=${() => this.runSave(() => store.exportActive())}>${icon('download', 16)} Save to Downloads <kbd>${MOD}S</kbd></button>
+              ${store.canPickLocation
+                ? html`<button @click=${() => this.runSave(() => store.exportActive(true))}>${icon('save', 16)} Save as… <kbd>${MOD}⇧S</kbd></button>`
+                : nothing}
+              ${n > 1
+                ? html`<button @click=${() => this.runSave(() => store.exportAll())}>${icon('download', 16)} Save all ${n} to Downloads</button>`
+                : nothing}
+              ${n > 1 && store.canPickFolder
+                ? html`<button @click=${() => this.runSave(() => store.exportAll(true))}>${icon('folderDown', 16)} Save all ${n} to a folder…</button>`
+                : nothing}
+            </div>
+            <p class="muted" style="margin:0;font-size:12px">Files are named “name-edited”. Your originals are never changed.</p>
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
+  private runSave(fn: () => Promise<void>) {
+    this.saveOpen = false;
+    void fn();
+  }
+
+  private onDocClick = () => {
+    if (this.saveOpen) this.saveOpen = false;
+  };
+
   render() {
     const doc = store.active;
     return html`
@@ -189,6 +271,7 @@ export class LoupeApp extends LitElement {
           <button class="ghost" aria-label="Undo" title="Undo (${MOD}Z)" ?disabled=${!doc?.canUndo} @click=${() => store.undo()}>${icon('undo', 16)}</button>
           <button class="ghost" aria-label="Redo" title="Redo (${MOD}⇧Z)" ?disabled=${!doc?.canRedo} @click=${() => store.redo()}>${icon('redo', 16)}</button>
           <button @click=${this.pickFiles}>${icon('open', 16)} Open</button>
+          ${this.renderSave()}
         </div>
       </header>
 
@@ -346,9 +429,11 @@ export class LoupeApp extends LitElement {
 
     if (mod && k === 'o') { e.preventDefault(); this.pickFiles(); return; }
     if (!store.active) return;
-    if (mod && k === 's') { e.preventDefault(); void store.exportActive(); return; }
+    if (mod && k === 's') { e.preventDefault(); this.saveOpen = false; void store.exportActive(e.shiftKey); return; }
+    if (k === 'escape' && this.saveOpen) { this.saveOpen = false; return; }
     if (typing) return;
 
+    if (mod && e.shiftKey && k === 'i') { e.preventDefault(); store.invertSelection(); return; }
     if (mod && k === 'z') { e.preventDefault(); void (e.shiftKey ? store.redo() : store.undo()); return; }
     if (mod && k === 'y') { e.preventDefault(); void store.redo(); return; }
     if (mod && k === 'a') { e.preventDefault(); store.selectAll(); return; }
@@ -360,7 +445,8 @@ export class LoupeApp extends LitElement {
     if (mod || e.altKey) return;
 
     if (k === 'escape') {
-      if (store.tool === 'crop') store.setTool('select-rect');
+      if (store.preview) store.setPreview(null);
+      else if (store.tool === 'crop') store.setTool('select-rect');
       else store.setSelection(null);
       return;
     }

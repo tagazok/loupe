@@ -1,6 +1,6 @@
 import { ImageDoc } from './core/doc';
 import { engine } from './core/engine';
-import { clampRect, extract, fullRect, putRegion, type Px, type Rect, type Shape } from './core/pixels';
+import { blendShape, clampRect, extract, fullRect, putRegion, type Px, type Rect, type Shape } from './core/pixels';
 import type { WorkerRequest } from './core/protocol';
 import { Keeper } from './keeper';
 
@@ -12,11 +12,15 @@ export type ResizeSpec =
   | { mode: 'percent'; value: number }
   | { mode: 'longEdge'; value: number };
 
-/** Live colour preview shown on the canvas via ctx.filter before Apply. */
-export interface AdjustPreview {
-  brightness: number; // 1 = unchanged
-  contrast: number; // 1 = unchanged
-}
+/**
+ * Live preview drawn on the canvas before Apply. Colour previews use the same
+ * CSS formulas as the pixel ops; blur/pixelate are close screen-resolution
+ * approximations of the real (full-resolution) result.
+ */
+export type Preview =
+  | { kind: 'bc'; brightness: number; contrast: number } // 1 = unchanged
+  | { kind: 'blur'; radius: number }
+  | { kind: 'pixelate'; block: number };
 
 export interface Toast {
   id: number;
@@ -60,7 +64,7 @@ export class Store extends EventTarget {
   batch = false;
   busy: string | null = null;
   toasts: Toast[] = [];
-  preview: AdjustPreview | null = null;
+  preview: Preview | null = null;
   /** Locked crop aspect ratio (w / h), or null for free. */
   cropAspect: number | null = null;
   exportFormat: ExportFormat = 'original';
@@ -233,6 +237,23 @@ export class Store extends EventTarget {
     this.emit();
   }
 
+  /** Toggle "everything except the selection". */
+  invertSelection() {
+    const doc = this.active;
+    if (!doc) return;
+    if (!doc.selection) {
+      this.toast('Select an area first, then invert it to work on everything else.');
+      return;
+    }
+    doc.selection = { ...doc.selection, inverted: !doc.selection.inverted };
+    this.emit();
+  }
+
+  setPreview(preview: Preview | null) {
+    this.preview = preview;
+    this.notify();
+  }
+
   selectAll() {
     const doc = this.active;
     if (!doc) return;
@@ -257,7 +278,15 @@ export class Store extends EventTarget {
   ) {
     const sel = useSelection ? doc.selectionRect() : null;
     const shape: Shape = (useSelection && doc.selection?.shape) || 'rect';
-    if (!sel) {
+    if (sel && doc.selection?.inverted) {
+      // Everything except the selection: edit the whole image, then put the
+      // original pixels back inside the selected shape.
+      const before = doc.px;
+      const out = await engine.runPx(build(doc.snapshot(), fullRect(before), 'rect'));
+      blendShape(out, extract(before, sel), sel, shape);
+      doc.px = out;
+      doc.pushFull(label, before);
+    } else if (!sel) {
       const before = doc.px;
       doc.px = await engine.runPx(build(doc.snapshot(), fullRect(before), 'rect'));
       doc.pushFull(label, before);
@@ -305,7 +334,7 @@ export class Store extends EventTarget {
         ),
       );
     });
-    if (ok && kind === 'brightnessContrast') this.preview = null;
+    if (ok && kind === 'brightnessContrast' && this.preview?.kind === 'bc') this.preview = null;
     this.emit();
   }
 
@@ -318,13 +347,14 @@ export class Store extends EventTarget {
     if (!doc) return;
     const label = kind === 'blur' ? 'Blur' : kind === 'pixelate' ? 'Pixelate' : 'Fill';
     const radius = params.radius ?? 12;
-    await this.job(label, async () => {
+    const ok = await this.job(label, async () => {
       await this.regionOp(doc, label, kind === 'blur' ? Math.ceil(radius * 3) : 0, (px, region, shape) => {
         if (kind === 'blur') return { op: 'blur', px, region, shape, radius };
         if (kind === 'pixelate') return { op: 'pixelate', px, region, shape, block: params.block ?? 16 };
         return { op: 'fill', px, region, shape, rgba: params.rgba ?? [0, 0, 0, 255] };
       });
     });
+    if (ok && this.preview?.kind === kind) this.preview = null;
     this.emit();
   }
 
@@ -415,29 +445,93 @@ export class Store extends EventTarget {
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
-  async exportActive() {
+  /** Chromium's File System Access API (Chrome, Edge, Arc). Absent in Safari/Firefox. */
+  get canPickLocation(): boolean {
+    return typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+  }
+
+  get canPickFolder(): boolean {
+    return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  }
+
+  /** Save the active image: straight to Downloads, or ask where (`pick`). */
+  async exportActive(pick = false) {
     const doc = this.active;
     if (!doc) return;
-    await this.job('Export', async () => {
+    if (pick && this.canPickLocation) {
+      // The picker must open during the click (user activation), before any slow encoding.
+      const mime = this.exportMime(doc);
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await (window as unknown as FsWindow).showSaveFilePicker({
+          suggestedName: exportName(doc.name, mime),
+          types: [{ description: `${EXT[mime].toUpperCase()} image`, accept: { [mime]: [`.${EXT[mime]}`] } }],
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        throw err;
+      }
+      await this.job('Saving', async () => {
+        const { blob } = await this.encode(doc);
+        const w = await handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        doc.dirty = false;
+        this.toast(`Saved ${handle.name} (${formatBytes(blob.size)})`);
+      });
+      return;
+    }
+    await this.job('Saving', async () => {
       const { blob, name } = await this.encode(doc);
       this.download(blob, name);
       doc.dirty = false;
-      this.toast(`Saved ${name} (${formatBytes(blob.size)})`);
+      this.toast(`Saved ${name} to Downloads (${formatBytes(blob.size)})`);
     });
   }
 
-  async exportAll() {
+  /** Save every tab: to Downloads, or into a folder you choose (`pick`). */
+  async exportAll(pick = false) {
     if (this.docs.length === 0) return;
-    await this.job(`Export ${this.docs.length} images`, async () => {
+    let dir: FileSystemDirectoryHandle | null = null;
+    if (pick && this.canPickFolder) {
+      try {
+        dir = await (window as unknown as FsWindow).showDirectoryPicker({ mode: 'readwrite' });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        throw err;
+      }
+    }
+    await this.job(`Saving ${this.docs.length} images`, async () => {
       for (const doc of this.docs) {
         const { blob, name } = await this.encode(doc);
-        this.download(blob, name);
+        if (dir) {
+          const fh = await dir.getFileHandle(name, { create: true });
+          const w = await fh.createWritable();
+          await w.write(blob);
+          await w.close();
+        } else {
+          this.download(blob, name);
+          // Small gap: browsers throttle bursts of downloads.
+          await new Promise((r) => setTimeout(r, 250));
+        }
         doc.dirty = false;
-        // Small gap: browsers throttle bursts of downloads.
-        await new Promise((r) => setTimeout(r, 250));
       }
-      this.toast(`Saved ${this.docs.length} images to your Downloads folder.`);
+      this.toast(dir ? `Saved ${this.docs.length} images to “${dir.name}”.` : `Saved ${this.docs.length} images to Downloads.`);
     });
+  }
+}
+
+interface FsWindow {
+  showSaveFilePicker(opts: {
+    suggestedName: string;
+    types: { description: string; accept: Record<string, string[]> }[];
+  }): Promise<FileSystemFileHandle>;
+  showDirectoryPicker(opts: { mode: 'readwrite' }): Promise<FileSystemDirectoryHandle>;
+}
+
+declare global {
+  interface FileSystemFileHandle {
+    createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>;
   }
 }
 
