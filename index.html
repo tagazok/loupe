@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Loupe — a tiny Photoshop-style image editor that runs entirely in your browser. Crop, resize, blur, pixelate, black & white. Nothing is uploaded." />
+    <meta name="theme-color" content="#1b1c1f" />
+    <title>Loupe — image editor</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234c8dff' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='6.5'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        --bg: #1b1c1f;
+        --canvas-bg: #141517;
+        --chrome: #232428;
+        --panel: #232428;
+        --border: #34363c;
+        --border-strong: #4a4d55;
+        --text: #d9dbe0;
+        --text-strong: #ffffff;
+        --muted: #9a9ea8;
+        --muted-strong: #b6bac3;
+        --btn: #2c2e33;
+        --btn-hover: #383a41;
+        --input: #1b1c1f;
+        --accent: #4c8dff;
+        --accent-hover: #6a9fff;
+        --accent-subtle: rgba(76, 141, 255, 0.16);
+        --on-accent: #ffffff;
+        --tooltip: #f0f1f4;
+        --tooltip-fg: #17181b;
+        --danger: #c8434b;
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; }
+    </style>
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <loupe-app></loupe-app>
+    <noscript>Loupe needs JavaScript to edit images in your browser.</noscript>
+  </body>
+</html>
