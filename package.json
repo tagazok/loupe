@@ -1,0 +1,23 @@
+{
+  "name": "loupe",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A mini Photoshop-style image editor that runs entirely in the browser.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4180 --strictPort",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lit": "3.3.3",
+    "lucide": "1.55.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "4.1.11"
+  }
+}
